@@ -1,5 +1,4 @@
-
-name: Update Garden Game v0.4
+name: Update Garden Game v0.5
 
 on:
   workflow_dispatch:
@@ -10,42 +9,55 @@ permissions:
 jobs:
   update:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
-      - name: Checkout repository
+      - name: Checkout project
         uses: actions/checkout@v4
 
-      - name: Install v0.4 project
+      - name: Install v0.5 visual update
         run: |
-          set -e
-          test -f Garden_Project_v0.4.zip
-          unzip -tq Garden_Project_v0.4.zip
-          unzip -oq Garden_Project_v0.4.zip -d . -x '.github/*'
-          test -f project.godot
+          set -eu
+          test -f Garden_Visual_v0.5.zip
+          unzip -tq Garden_Visual_v0.5.zip
+          unzip -oq Garden_Visual_v0.5.zip -d . -x '.github/*'
+          test -f assets/textures/lawn.png
+          test -f assets/audio/pea_shot.wav
           test -f assets/models/peashooter.glb
+          grep -q 'func _grass_multimesh' scripts/garden.gd
           grep -q 'func _handle_touch' scripts/main.gd
-          grep -q 'func _hit_flash' scripts/garden.gd
-          rm Garden_Project_v0.4.zip
+          sed -i 's/VERSION 0.4/VERSION 0.5/g' scripts/main.gd
+          sed -i 's/GARDEN PROJECT/GARDEN MOBILE/g' scripts/main.gd
+          if ! grep -q 'textures/vram_compression/import_etc2_astc=true' project.godot; then
+            sed -i '/^\[rendering\]$/a textures/vram_compression/import_etc2_astc=true' project.godot
+          fi
+          rm Garden_Visual_v0.5.zip
 
-      - name: Install Godot
+      - name: Set up Godot
         uses: chickensoft-games/setup-godot@v2
         with:
           version: 4.4.1
           use-dotnet: false
 
-      - name: Validate before saving
+      - name: Check imports and scripts
+        shell: bash
         run: |
-          godot --headless --path . --editor --import --quit
-          godot --headless --path . --quit-after 5
+          set -o pipefail
+          godot --headless --path . --editor --import --quit 2>&1 | tee import.log
+          godot --headless --path . --quit-after 10 2>&1 | tee play.log
+          if grep -Ei 'SCRIPT ERROR|Parse Error|Invalid call|Failed to load script' import.log play.log; then
+            echo "Godot script error: update was NOT committed"
+            exit 1
+          fi
 
-      - name: Save updated game
+      - name: Save version 0.5
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A -- scripts scenes assets project.godot README.md README_RU.md Garden_Project_v0.4.zip
+          git add -A -- scripts/garden.gd scripts/main.gd project.godot assets/textures assets/audio README_v0.5_RU.txt Garden_Visual_v0.5.zip
           if git diff --cached --quiet; then
-            echo "Project already updated"
+            echo "Already updated"
           else
-            git commit -m "Update Garden Warfare to v0.4"
+            git commit -m "Garden Warfare Mobile v0.5 visual update"
             git push
           fi
