@@ -19,6 +19,59 @@ jobs:
           test -f scenes/main.tscn
           test -f assets/models/peashooter.glb
 
+      - name: Create app icon
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import struct, zlib
+
+          size = 1024
+          raw = bytearray()
+
+          for y in range(size):
+              raw.append(0)
+              for x in range(size):
+                  color = (24, 111 + 35 * y // size, 74)
+                  if (x-455)**2 + (y-520)**2 < 235**2:
+                      color = (108, 203, 53)
+                  if 530 < x < 850 and 430 < y < 600:
+                      color = (92, 184, 41)
+                  if (x-845)**2 + (y-515)**2 < 93**2:
+                      color = (66, 151, 35)
+                  if (x-370)**2 + (y-433)**2 < 53**2:
+                      color = (249, 250, 237)
+                  if (x-386)**2 + (y-433)**2 < 19**2:
+                      color = (27, 58, 33)
+                  raw.extend((*color, 255))
+
+          def chunk(tag, data):
+              return (
+                  struct.pack(">I", len(data))
+                  + tag + data
+                  + struct.pack(">I", zlib.crc32(tag + data) & 0xffffffff)
+              )
+
+          image = (
+              b'\x89PNG\r\n\x1a\n'
+              + chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 6, 0, 0, 0))
+              + chunk(b'IDAT', zlib.compress(raw, 9))
+              + chunk(b'IEND', b'')
+          )
+
+          Path("app_icon.png").write_bytes(image)
+
+          project = Path("project.godot")
+          contents = project.read_text()
+          if "config/icon=" not in contents:
+              contents = contents.replace(
+                  "[application]",
+                  '[application]\nconfig/icon="res://app_icon.png"',
+                  1
+              )
+          project.write_text(contents)
+          PY
+
       - name: Create iOS export settings
         run: |
           cat > export_presets.cfg <<'EOF'
@@ -51,6 +104,7 @@ jobs:
           orientation/portrait=false
           orientation/landscape_left=true
           orientation/landscape_right=true
+          icons/icon_1024x1024="res://app_icon.png"
           EOF
 
       - name: Build unsigned IPA
