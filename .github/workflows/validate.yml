@@ -1,4 +1,5 @@
-name: Upgrade Garden Warfare v0.5 (no ZIP)
+
+name: Upgrade Garden Warfare v0.5 - Animation Fix
 
 on:
   workflow_dispatch:
@@ -7,444 +8,164 @@ permissions:
   contents: write
 
 jobs:
-  upgrade:
+  animate:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 20
+
     steps:
-      - name: Checkout working Garden v0.4
+      - name: Checkout existing v0.5
         uses: actions/checkout@v4
 
-      - name: Add animated Peashooter and detailed garden
+      - name: Add Peashooter animations
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p scripts assets/textures assets/audio
-          cat > scripts/pea_anim.gd <<'GDCODEPEA'
+
+          test -f scripts/garden.gd
+          test -f assets/models/peashooter.glb
+          test -f assets/textures/lawn.png
+          test -f assets/audio/pea_shot.wav
+
+          cat > scripts/pea_anim.gd <<'GDSCRIPT'
           extends Node3D
-          # Lightweight procedural animation for the EXISTING Peashooter GLB.
-          # Mesh groups are pivoted: head and individual leaf meshes really move.
+
           var actor: CharacterBody3D
-          var body: Node3D
           var head: Node3D
           var leaves: Array[Node3D] = []
-          var time_passed := 0.0
-          var walk_amount := 0.0
-          var shot_recoil := 0.0
-          var landing := 0.0
-          var was_airborne := false
+          var clock := 0.0
+          var movement := 0.0
+          var recoil_amount := 0.0
+          var landing_amount := 0.0
+          var previously_airborne := false
 
-          func configure(model: Node3D, character: CharacterBody3D, visual_root: Node3D) -> void:
-          	actor = character
-          	body = visual_root
-          	head = Node3D.new()
-          	head.name = "AnimatedHeadPivot"
-          	head.position = Vector3(0.0, 1.48, 0.0)
-          	model.add_child(head)
-          	var nodes: Array[MeshInstance3D] = []
-          	_find_meshes(model, nodes)
-          	var selected_leaves := 0
-          	for part in nodes:
-          		var n := String(part.name).to_lower()
-          		if n.begins_with("green_") or n.begins_with("green_light_") or n.begins_with("snout_") or n.begins_with("lip_") or n.begins_with("mouth_") or n.begins_with("dark_green_") or n.begins_with("eyes_") or n.begins_with("pupil_") or n.begins_with("shine_") or n.begins_with("freckles_"):
-          			part.reparent(head, true)
-          		elif (n.begins_with("leaf_") or n.begins_with("light_leaf_")) and selected_leaves < 12:
-          			var leaf := Node3D.new()
-          			leaf.name = "AnimatedLeaf"
-          			var bounds: AABB = part.get_aabb()
-          			# GLB vertices already contain their local positions.
-          			leaf.position = bounds.get_center()
-          			model.add_child(leaf)
-          			part.reparent(leaf, true)
-          			leaves.append(leaf)
-          			selected_leaves += 1
+          func configure(model: Node3D, character: CharacterBody3D) -> void:
+            actor = character
+            head = Node3D.new()
+            head.name = "PeashooterHeadPivot"
+            model.add_child(head)
+            head.position = Vector3(0.0, 1.48, 0.0)
 
-          func _find_meshes(node: Node, output: Array[MeshInstance3D]) -> void:
-          	for child in node.get_children():
-          		if child is MeshInstance3D:
-          			output.append(child)
-          		_find_meshes(child, output)
+            var parts: Array[MeshInstance3D] = []
+            _collect_meshes(model, parts)
+
+            for part in parts:
+              var n := String(part.name).to_lower()
+              var belongs_to_head := n.begins_with("green_") or n.begins_with("green_light_") or n.begins_with("snout_") or n.begins_with("lip_") or n.begins_with("mouth_") or n.begins_with("dark_green_") or n.begins_with("eyes_") or n.begins_with("pupil_") or n.begins_with("shine_") or n.begins_with("freckles_")
+
+              if belongs_to_head:
+                part.reparent(head, true)
+              elif (n.begins_with("leaf_") or n.begins_with("light_leaf_")) and leaves.size() < 24:
+                var pivot := Node3D.new()
+                pivot.name = "LeafPivot"
+                model.add_child(pivot)
+                pivot.global_position = part.to_global(part.get_aabb().get_center())
+                part.reparent(pivot, true)
+                leaves.append(pivot)
+
+            print("Peashooter animation ready")
+
+          func _collect_meshes(root: Node, result: Array[MeshInstance3D]) -> void:
+            for child in root.get_children():
+              if child is MeshInstance3D:
+                result.append(child)
+              _collect_meshes(child, result)
 
           func recoil() -> void:
-          	shot_recoil = 1.0
+            recoil_amount = 1.0
 
           func _process(delta: float) -> void:
-          	if actor == null or body == null or head == null:
-          		return
-          	time_passed += delta
-          	var speed := Vector2(actor.velocity.x, actor.velocity.z).length()
-          	walk_amount = move_toward(walk_amount, clampf(speed / 5.5, 0.0, 1.0), delta * 5.0)
-          	shot_recoil = move_toward(shot_recoil, 0.0, delta * 5.2)
-          	var airborne := not actor.is_on_floor()
-          	if was_airborne and not airborne:
-          		landing = 1.0
-          	was_airborne = airborne
-          	landing = move_toward(landing, 0.0, delta * 3.2)
-          	var beat := time_passed * (10.0 if walk_amount > 0.3 else 2.7)
-          	# Head bend, run bob, jump extension, recoil and landing squash.
-          	head.rotation.x = sin(beat) * 0.028 + walk_amount * sin(beat) * 0.095 - shot_recoil * 0.24
-          	head.rotation.z = sin(time_passed * 2.1) * 0.045 + walk_amount * cos(beat * 0.5) * 0.055
-          	head.position.y = 1.48 + sin(beat) * (0.017 + 0.075 * walk_amount) + (0.12 if airborne else 0.0) - landing * 0.14
-          	head.scale = Vector3(1.0 + landing * 0.05, 1.0 - landing * 0.08, 1.0 + landing * 0.05)
-          	for i in range(leaves.size()):
-          		var leaf: Node3D = leaves[i]
-          		var phase := float(i) * 0.7
-          		leaf.rotation.z = sin(beat + phase) * (0.045 + walk_amount * 0.21)
-          		leaf.rotation.x = sin(time_passed * 3.1 + phase) * (0.035 + walk_amount * 0.11)
-          GDCODEPEA
-          cat > scripts/deluxe_garden.gd <<'GDCODEGARDEN'
-          extends Node3D
-          # A more detailed, entirely original small suburban training map.
-          # Works with Godot 4 Compatibility / iPhone.
-          var rng := RandomNumberGenerator.new()
-          var materials: Dictionary = {}
+            if actor == null or head == null:
+              return
 
-          func _ready() -> void:
-          	rng.seed = 92381
-          	_world()
-          	_house(Vector3(-12.5, 0.0, -13.0), Color("e9d9b8"))
-          	_garage(Vector3(12.5, 0.0, -16.0))
-          	_for_fences()
-          	_paths()
-          	_props()
+            clock += delta
 
-          func _mat(tint: Color, texture_name: String = "", repeat_uv: float = 1.0) -> StandardMaterial3D:
-          	var key := "%s:%s:%s" % [tint.to_html(), texture_name, str(repeat_uv)]
-          	if materials.has(key):
-          		return materials[key]
-          	var mat := StandardMaterial3D.new()
-          	mat.albedo_color = tint
-          	mat.roughness = 0.88
-          	if not texture_name.is_empty():
-          		var path := "res://assets/textures/" + texture_name + ".png"
-          		mat.albedo_texture = load(path)
-          		mat.uv1_scale = Vector3(repeat_uv, repeat_uv, 1.0)
-          		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
-          	materials[key] = mat
-          	return mat
+            var horizontal_speed := Vector2(actor.velocity.x, actor.velocity.z).length()
+            movement = move_toward(movement, clampf(horizontal_speed / 5.5, 0.0, 1.0), delta * 6.0)
+            recoil_amount = move_toward(recoil_amount, 0.0, delta * 6.5)
 
-          func _box(pos: Vector3, size: Vector3, color: Color, texture_name: String = "", rotation_z: float = 0.0, uv: float = 1.0) -> MeshInstance3D:
-          	var mesh := BoxMesh.new()
-          	mesh.size = size
-          	var item := MeshInstance3D.new()
-          	item.mesh = mesh
-          	item.position = pos
-          	item.rotation.z = rotation_z
-          	item.material_override = _mat(color, texture_name, uv)
-          	add_child(item)
-          	return item
+            var airborne := not actor.is_on_floor()
 
-          func _sphere(pos: Vector3, size: Vector3, color: Color) -> void:
-          	var mesh := SphereMesh.new()
-          	mesh.radius = 0.5
-          	mesh.height = 1.0
-          	mesh.radial_segments = 12
-          	mesh.rings = 8
-          	var node := MeshInstance3D.new()
-          	node.mesh = mesh
-          	node.position = pos
-          	node.scale = size
-          	node.material_override = _mat(color)
-          	add_child(node)
+            if previously_airborne and not airborne:
+              landing_amount = 1.0
 
-          func _cylinder(pos: Vector3, radius: float, height: float, color: Color) -> void:
-          	var mesh := CylinderMesh.new()
-          	mesh.top_radius = radius
-          	mesh.bottom_radius = radius * 1.12
-          	mesh.height = height
-          	mesh.radial_segments = 10
-          	var node := MeshInstance3D.new()
-          	node.mesh = mesh
-          	node.position = pos
-          	node.material_override = _mat(color, "wood" if color.r > 0.30 and color.g < 0.50 else "")
-          	add_child(node)
+            previously_airborne = airborne
+            landing_amount = move_toward(landing_amount, 0.0, delta * 4.0)
 
-          func _solid(pos: Vector3, size: Vector3, color: Color, texture_name: String = "") -> void:
-          	var body := StaticBody3D.new()
-          	body.position = pos
-          	body.collision_layer = 1
-          	add_child(body)
-          	var shape := CollisionShape3D.new()
-          	var box := BoxShape3D.new()
-          	box.size = size
-          	shape.shape = box
-          	body.add_child(shape)
-          	var boxmesh := BoxMesh.new()
-          	boxmesh.size = size
-          	var visual := MeshInstance3D.new()
-          	visual.mesh = boxmesh
-          	visual.material_override = _mat(color, texture_name, 2.0)
-          	body.add_child(visual)
+            var step_phase := clock * 10.0
 
-          func _world() -> void:
-          	var plane := PlaneMesh.new()
-          	plane.size = Vector2(49.9, 49.9)
-          	var lawn := MeshInstance3D.new()
-          	lawn.mesh = plane
-          	lawn.position.y = 0.004
-          	lawn.material_override = _mat(Color("a9c59b"), "lawn", 28.0)
-          	add_child(lawn)
-          	# Patchy earth around flowerbeds creates variation in the grass.
-          	for i in range(13):
-          		var x := rng.randf_range(-20.0, 20.0)
-          		var z := rng.randf_range(-19.0, 19.0)
-          		if absf(x) < 4.0 and z > -9.0:
-          			continue
-          		_box(Vector3(x, 0.014, z), Vector3(rng.randf_range(1.5, 3.4), 0.018, 1.1), Color("b0a68a"), "earth")
+            head.rotation.x = sin(clock * 2.6) * 0.025 + sin(step_phase) * movement * 0.10 - recoil_amount * 0.23
+            head.rotation.z = sin(clock * 1.8) * 0.035 + cos(step_phase * 0.5) * movement * 0.055
 
-          func _house(at: Vector3, wall_color: Color) -> void:
-          	var x := at.x
-          	var z := at.z
-          	_solid(Vector3(x, 2.20, z), Vector3(8.0, 4.40, 7.1), wall_color, "stucco")
-          	# Sloping tiled roof instead of a flat orange box.
-          	_box(Vector3(x - 2.05, 4.95, z), Vector3(5.30, 0.24, 8.4), Color("b9a49b"), "shingles", -0.43, 3.0)
-          	_box(Vector3(x + 2.05, 4.95, z), Vector3(5.30, 0.24, 8.4), Color("b9a49b"), "shingles", 0.43, 3.0)
-          	_box(Vector3(x, 5.98, z), Vector3(0.22, 0.18, 8.5), Color("724439"))
-          	_box(Vector3(x - 2.10, 6.05, z - 0.8), Vector3(0.7, 1.4, 0.7), Color("a57868"), "stone")
-          	# Windows, glass, frames and shutters.
-          	for dx in [-2.5, 2.5]:
-          		_box(Vector3(x + dx, 2.85, z + 3.61), Vector3(1.6, 1.55, 0.10), Color("e8e1c8"))
-          		_box(Vector3(x + dx, 2.85, z + 3.675), Vector3(1.36, 1.31, 0.055), Color("85b8c2"))
-          		_box(Vector3(x + dx, 2.85, z + 3.71), Vector3(0.07, 1.35, 0.065), Color("e9d8b4"))
-          		_box(Vector3(x + dx, 2.85, z + 3.71), Vector3(1.36, 0.07, 0.065), Color("e9d8b4"))
-          		_box(Vector3(x + dx - 0.98, 2.85, z + 3.65), Vector3(0.30, 1.72, 0.10), Color("497d7d"), "wood")
-          		_box(Vector3(x + dx + 0.98, 2.85, z + 3.65), Vector3(0.30, 1.72, 0.10), Color("497d7d"), "wood")
-          	_box(Vector3(x, 1.44, z + 3.65), Vector3(1.5, 2.87, 0.16), Color("7d4b30"), "wood")
-          	_sphere(Vector3(x + 0.49, 1.50, z + 3.80), Vector3(0.12, 0.12, 0.12), Color("efc66c"))
-          	_box(Vector3(x, 0.13, z + 4.1), Vector3(3.6, 0.24, 1.8), Color("cac0a4"), "stone")
-          	# Flower pots beside the door.
-          	for offset in [-2.5, 2.5]:
-          		_cylinder(Vector3(x + offset, 0.30, z + 4.17), 0.36, 0.57, Color("9d5f44"))
-          		_for_flower(Vector3(x + offset, 0.65, z + 4.17), 2)
+            head.position.y = 1.48 + sin(clock * 2.7) * 0.016 + absf(sin(step_phase)) * movement * 0.055 + (0.10 if airborne else 0.0) - landing_amount * 0.11
 
-          func _garage(at: Vector3) -> void:
-          	var x := at.x
-          	var z := at.z
-          	_solid(Vector3(x, 1.95, z), Vector3(7.1, 3.9, 6.2), Color("ccc4ab"), "stucco")
-          	_box(Vector3(x, 4.12, z), Vector3(7.8, 0.35, 6.75), Color("855e4f"), "shingles", 0.0, 2.0)
-          	_box(Vector3(x, 1.7, z + 3.17), Vector3(4.7, 3.05, 0.16), Color("838f76"), "wood")
-          	for i in range(4):
-          		_box(Vector3(x, 0.70 + i * 0.63, z + 3.29), Vector3(4.5, 0.075, 0.08), Color("d1d3be"))
-          	_box(Vector3(x - 4.2, 0.02, z + 2.6), Vector3(2.1, 0.07, 5.8), Color("ada29a"), "pavers")
+            head.scale = Vector3(1.0 + landing_amount * 0.05, 1.0 - landing_amount * 0.08, 1.0 + landing_amount * 0.05)
 
-          func _for_fences() -> void:
-          	for i in range(-23, 24, 3):
-          		for zz in [-23.0, 23.0]:
-          			_fence_post(Vector3(float(i), 0.0, zz))
-          			_box(Vector3(float(i) + 1.4, 0.94, zz), Vector3(2.8, 0.15, 0.12), Color("d7c09c"), "wood")
-          		for xx in [-23.0, 23.0]:
-          			_fence_post(Vector3(xx, 0.0, float(i)))
-          			_box(Vector3(xx, 0.94, float(i) + 1.4), Vector3(0.12, 0.15, 2.8), Color("d7c09c"), "wood")
+            for i in range(leaves.size()):
+              var phase := float(i) * 0.65
+              leaves[i].rotation.z = sin(clock * 2.8 + phase) * 0.05 + sin(step_phase + phase) * movement * 0.18
+              leaves[i].rotation.x = cos(clock * 2.0 + phase) * 0.035 + cos(step_phase + phase) * movement * 0.08
+          GDSCRIPT
 
-          func _fence_post(p: Vector3) -> void:
-          	_box(p + Vector3(0.0, 0.75, 0.0), Vector3(0.18, 1.5, 0.18), Color("ddc29c"), "wood")
-          	_box(p + Vector3(0.0, 1.54, 0.0), Vector3(0.30, 0.15, 0.30), Color("c6a57e"), "wood")
-
-          func _paths() -> void:
-          	# A curved path of correctly UV-mapped stone slabs.
-          	for i in range(12):
-          		var t := float(i)
-          		var z := 12.0 - 2.05 * t
-          		var x := sin(t * 0.46) * 1.0 - 2.6
-          		_box(Vector3(x, 0.052, z), Vector3(1.9, 0.085, 1.3), Color("d1cbc0"), "pavers")
-          	# Low brick planters on both sides of the path.
-          	for side in [-1.0, 1.0]:
-          		var bx := side * 6.7
-          		_box(Vector3(bx, 0.24, 1.3), Vector3(3.6, 0.46, 7.2), Color("9f7469"), "stone")
-          		_box(Vector3(bx, 0.49, 1.3), Vector3(3.2, 0.10, 6.8), Color("5e4937"), "earth")
-          		for i in range(12):
-          			_for_flower(Vector3(bx + rng.randf_range(-1.2, 1.2), 0.59, -1.6 + i * 0.52), i)
-
-          func _tree(p: Vector3, scale_factor: float) -> void:
-          	# Clustered crowns, without oversized flat spheres.
-          	_cylinder(p + Vector3(0, 1.75 * scale_factor, 0), 0.30 * scale_factor, 3.5 * scale_factor, Color("866148"))
-          	for shift in [Vector3(-0.7, 3.4, 0.1), Vector3(0.7, 3.9, 0.0), Vector3(0.1, 4.45, -0.5), Vector3(0, 3.7, 0.7)]:
-          		_sphere(p + shift * scale_factor, Vector3(2.15, 2.15, 2.15) * scale_factor, Color("466d43") if shift.y < 3.8 else Color("5a8b4d"))
-
-          func _for_flower(p: Vector3, color_variant: int) -> void:
-          	var shades := [Color("f6b7a9"), Color("fce2a0"), Color("edd3fa"), Color("ffb8c1")]
-          	_cylinder(p + Vector3(0, 0.16, 0), 0.025, 0.34, Color("47733c"))
-          	for k in range(5):
-          		var a := float(k) * TAU / 5.0
-          		_sphere(p + Vector3(cos(a) * 0.12, 0.34, sin(a) * 0.12), Vector3(0.20, 0.11, 0.20), shades[color_variant % 4])
-          	_sphere(p + Vector3(0, 0.34, 0), Vector3(0.19, 0.14, 0.19), Color("f5c760"))
-
-          func _props() -> void:
-          	for i in range(12):
-          		var x := rng.randf_range(-21.0, 21.0)
-          		var z := rng.randf_range(-20.0, 20.0)
-          		if (Vector2(x + 12.5, z + 13.0).length() < 8.0 or Vector2(x - 12.5, z + 16.0).length() < 8.0 or Vector2(x, z - 8.0).length() < 6.5):
-          			continue
-          		_tree(Vector3(x, 0, z), rng.randf_range(0.75, 1.18))
-          	for i in range(43):
-          		var x := rng.randf_range(-21.0, 21.0)
-          		var z := rng.randf_range(-21.0, 21.0)
-          		if absf(x) < 4.0 and z > -11.0:
-          			continue
-          		_sphere(Vector3(x, 0.25, z), Vector3(rng.randf_range(0.75, 1.55), 0.58, 0.85), Color("447c40") if i % 3 == 0 else Color("5d9545"))
-          	for i in range(28):
-          		var x := rng.randf_range(-20.0, 20.0)
-          		var z := rng.randf_range(-20.0, 20.0)
-          		_for_flower(Vector3(x, 0.02, z), i)
-          	# Three low-poly training-range props.
-          	for i in range(3):
-          		var x := 4.0 + float(i) * 4.4
-          		var z := -8.0 - float(i % 2) * 3.5
-          		_box(Vector3(x, 0.12, z), Vector3(2.8, 0.22, 1.5), Color("aaa89a"), "stone")
-          		_box(Vector3(x - 1.5, 0.55, z + 0.4), Vector3(0.7, 1.1, 0.7), Color("9c7357"), "wood")
-          		_box(Vector3(x + 1.6, 0.42, z - 0.35), Vector3(0.65, 0.85, 0.65), Color("9c7357"), "wood")
-          GDCODEGARDEN
-          cat > /tmp/make_assets.py <<'PYGENASSETS'
-          from pathlib import Path
-          import math, random, struct, zlib, wave
-          root=Path('assets')
-          (root/'textures').mkdir(parents=True, exist_ok=True)
-          (root/'audio').mkdir(parents=True, exist_ok=True)
-          random.seed(1968)
-
-          # Deterministic tiled procedural textures; no PIL/pip/network.
-          def png_chunk(code, data):
-              return struct.pack('>I',len(data))+code+data+struct.pack('>I',zlib.crc32(code+data)&0xffffffff)
-
-          def save(name, base, kind, side=256):
-              pixelrows=bytearray()
-              for y in range(side):
-                  pixelrows.append(0)
-                  for x in range(side):
-                      noise=random.randint(-15,15)
-                      tile=(x//42 + y//25) % 4
-                      border=(x%42 < 2 or y%25 < 2)
-                      if kind=='lawn':
-                          n=noise + int(6*math.sin(x*0.43+y*0.11))
-                          rgb=(base[0]+n//3, base[1]+n, base[2]+n//3)
-                      elif kind=='wood':
-                          n=noise//2 + 10*math.sin(x*0.08+y*0.03)
-                          rgb=(base[0]+n, base[1]+n*0.8, base[2]+n*0.7)
-                      elif kind=='shingles':
-                          m=-35 if border else 5*tile+noise
-                          rgb=tuple(k+m for k in base)
-                      elif kind=='pavers':
-                          n=-35 if border else noise+tile*6
-                          rgb=tuple(k+n for k in base)
-                      elif kind=='stucco':
-                          n=noise//3
-                          rgb=tuple(k+n for k in base)
-                      elif kind=='stone':
-                          n=-20 if (x+y*2)%67<3 else noise+10*math.sin(x*0.10+y*0.04)
-                          rgb=tuple(k+n for k in base)
-                      else:
-                          n=noise*1.3
-                          rgb=tuple(k+n for k in base)
-                      pixelrows.extend(int(max(0,min(255,v))) for v in rgb)
-              ihdr=struct.pack('>IIBBBBB',side,side,8,2,0,0,0)
-              payload=b'\x89PNG\r\n\x1a\n'+png_chunk(b'IHDR',ihdr)+png_chunk(b'IDAT',zlib.compress(pixelrows,7))+png_chunk(b'IEND',b'')
-              (root/'textures'/f'{name}.png').write_bytes(payload)
-
-          for args in [
-          ('lawn',(82,146,69),'lawn'),
-          ('wood',(156,104,64),'wood'),
-          ('shingles',(145,85,71),'shingles'),
-          ('pavers',(165,156,140),'pavers'),
-          ('stucco',(210,198,165),'stucco'),
-          ('stone',(145,140,130),'stone'),
-          ('earth',(112,88,65),'earth')]:
-              save(*args)
-
-          rate=22050
-          for name, length, freq in [('pea_shot',0.14,240),('target_hit',0.23,420)]:
-              samples=bytearray()
-              for i in range(int(rate*length)):
-                  t=i/rate
-                  envelope=(1-t/length)**2
-                  wobble=math.sin(2*math.pi*(freq*(1-0.55*t/length))*t)
-                  signal=(wobble*0.7 + random.uniform(-1,1)*0.18)*envelope
-                  samples.extend(struct.pack('<h',int(signal*13000)))
-              with wave.open(str(root/'audio'/f'{name}.wav'),'wb') as f:
-                  f.setnchannels(1);f.setsampwidth(2);f.setframerate(rate);f.writeframes(samples)
-          print('Generated seven textures and two short sounds')
-          PYGENASSETS
-          cat > /tmp/patch_project.py <<'PYPATCHGAME'
+          cat > /tmp/patch_animations.py <<'PYTHON'
           from pathlib import Path
 
-          p=Path('scripts/garden.gd')
-          s=p.read_text()
-          if 'func _build_garden_deluxe()' not in s:
-              before='const MODEL_LOADER = preload("res://scripts/model_loader.gd")'
-              assert before in s, 'Garden script changed; refusing unsafe patch'
-              s=s.replace(before,before+'\nconst DELUXE = preload("res://scripts/deluxe_garden.gd")\nconst PEA_ANIMATION = preload("res://scripts/pea_anim.gd")',1)
-              assert '\t_build_garden()' in s
-              s=s.replace('\t_build_garden()','\t_build_garden_deluxe()',1)
-              assert 'var camera: Camera3D' in s
-              s=s.replace('var camera: Camera3D','var camera: Camera3D\nvar pea_animation: Node3D',1)
-              orig='\t\tplant.add_child(imported)\n\t\treturn'
-              assert orig in s
-              s=s.replace(orig,'\t\tplant.add_child(imported)\n\t\tpea_animation = PEA_ANIMATION.new()\n\t\timported.add_child(pea_animation)\n\t\tpea_animation.configure(imported, player, plant)\n\t\treturn',1)
-              pos='\tshot_cooldown = 0.25'
-              assert pos in s
-              s=s.replace(pos,pos+'\n\tif pea_animation != null:\n\t\tpea_animation.recoil()',1)
-              shot_start='\tvar start: Vector3 = player.global_position + Vector3(0,1.08,0) + Basis(Vector3.UP,yaw) * Vector3(0,0,-0.95)'
-              assert shot_start in s
-              s=s.replace(shot_start,shot_start+'\n\t_sound("res://assets/audio/pea_shot.wav",start)\n\t_flash(start,Color("cefb75"),0.13)',1)
-              old='func _hit_flash(world_position: Vector3) -> void:\n'
-              assert old in s
-              s=s.replace(old,old+'\t_sound("res://assets/audio/target_hit.wav",world_position)\n\t_flash(world_position,Color("ffe69c"),0.28)\n',1)
-              s+='''
+          p = Path('scripts/garden.gd')
+          s = p.read_text()
 
-          func _build_garden_deluxe() -> void:
-          	# Real static colliders, textured buildings, flowering planters and layered trees.
-          	_solid_box(Vector3(0,-0.36,0),Vector3(50,0.7,50),Color("577e4a"))
-          	var world_detail: Node3D = DELUXE.new()
-          	add_child(world_detail)
-          	for i in range(3):
-          		_target(Vector3(4.0 + float(i)*4.4, 1.2, -8.0 - float(i%2)*3.5))
+          if 'const PEA_ANIM =' not in s:
+              anchor = 'const MODEL_LOADER = preload("res://scripts/model_loader.gd")'
+              assert anchor in s, 'Model loader not found'
+              s = s.replace(
+                  anchor,
+                  anchor + '\nconst PEA_ANIM = preload("res://scripts/pea_anim.gd")',
+                  1
+              )
 
-          func _sound(path: String, at: Vector3) -> void:
-          	var audio := AudioStreamPlayer3D.new()
-          	audio.stream = load(path) as AudioStream
-          	if audio.stream == null:
-          		return
-          	audio.position = at
-          	audio.unit_size = 4.0
-          	add_child(audio)
-          	audio.finished.connect(audio.queue_free)
-          	audio.play()
+          if 'var pea_anim' not in s:
+              anchor = 'var camera: Camera3D'
+              assert anchor in s, 'Camera property not found'
+              s = s.replace(anchor, anchor + '\nvar pea_anim', 1)
 
-          func _flash(at: Vector3, color: Color, lifetime: float) -> void:
-          	var fx := Node3D.new()
-          	fx.position = at
-          	add_child(fx)
-          	_sphere(fx,Vector3.ZERO,Vector3(0.33,0.33,0.33),color)
-          	var tween := create_tween()
-          	tween.tween_property(fx,"scale",Vector3.ZERO,lifetime)
-          	tween.tween_callback(fx.queue_free)
-          '''
-              s=s.replace('env.background_color = Color("7dbbd9")','env.background_color = Color("96c5db")')
-              s=s.replace('env.ambient_light_energy = 0.43','env.ambient_light_energy = 0.58')
-              s=s.replace('sun.light_energy = 0.78','sun.light_energy = 0.92')
-              p.write_text(s)
+          if 'pea_anim.configure(imported, player)' not in s:
+              anchor = '\t\tplant.add_child(imported)'
+              assert anchor in s, 'Peashooter model loading point not found'
+              s = s.replace(
+                  anchor,
+                  anchor +
+                  '\n\t\tpea_anim = PEA_ANIM.new()'
+                  '\n\t\tplayer.add_child(pea_anim)'
+                  '\n\t\tpea_anim.configure(imported, player)',
+                  1
+              )
 
-          p=Path('scripts/main.gd')
-          s=p.read_text()
-          s=s.replace('"🌻  GARDEN PROJECT",35','"GARDEN WARFARE MOBILE",27')
-          s=s.replace('3D GARDEN PROTOTYPE  •  VERSION 0.4','TRAINING GARDEN  •  VERSION 0.5')
-          s=s.replace('Первый сад · спокойная тренировка','Тренировка Горохострела')
-          s=s.replace('Color("4b8d44")','Color("3e734d")')
-          s=s.replace('style.set_corner_radius_all(15)','style.set_corner_radius_all(12)')
-          s=s.replace('Color("75b656")','Color("579866")')
-          s=s.replace('Color(0.11,0.22,0.16,0.90)','Color(0.07,0.14,0.11,0.94)')
-          s=s.replace('Color(0.69,0.87,0.39,0.8)','Color(0.83,0.74,0.38,0.88)')
-          s=s.replace('Color("dbf8a1")','Color("f3dd93")')
+          if 'pea_anim.recoil()' not in s:
+              anchor = '\tshot_cooldown = 0.25'
+              assert anchor in s, 'Shooting function not found'
+              s = s.replace(
+                  anchor,
+                  anchor +
+                  '\n\tif pea_anim != null:'
+                  '\n\t\tpea_anim.recoil()',
+                  1
+              )
+
           p.write_text(s)
 
-          p=Path('project.godot')
-          s=p.read_text()
-          assert '[rendering]' in s
-          if 'textures/vram_compression/import_etc2_astc=true' not in s:
-              s=s.replace('[rendering]','[rendering]\ntextures/vram_compression/import_etc2_astc=true')
+          p = Path('scripts/main.gd')
+          s = p.read_text()
+          s = s.replace(
+              '3D GARDEN PROTOTYPE  •  VERSION 0.5',
+              'ANIMATED PEASHOOTER  •  VERSION 0.5.1'
+          )
           p.write_text(s)
-          print('Project patched; existing camera and touch code left intact.')
-          PYPATCHGAME
-          python3 /tmp/make_assets.py
-          python3 /tmp/patch_project.py
+
+          config = Path('project.godot').read_text()
+          assert 'textures/vram_compression/import_etc2_astc=true' in config, 'iOS export setting missing'
+
+          print('Animation patch completed')
+          PYTHON
+
+          python3 /tmp/patch_animations.py
 
       - name: Install Godot 4.4.1
         uses: chickensoft-games/setup-godot@v2
@@ -452,30 +173,29 @@ jobs:
           version: 4.4.1
           use-dotnet: false
 
-      - name: Verify imports, scripts and launch
+      - name: Check Godot before saving
         shell: bash
         run: |
           set -euo pipefail
           godot --headless --path . --editor --import --quit 2>&1 | tee import.log
-          godot --headless --path . --quit-after 30 2>&1 | tee play.log
+          godot --headless --path . --quit-after 25 2>&1 | tee play.log
+
           if grep -Ei 'SCRIPT ERROR|Parse Error|Failed to load script|Invalid call|Invalid set index' import.log play.log; then
-            echo "Script error: changes were NOT saved"
+            echo "Game script error detected"
             exit 1
           fi
-          test -f assets/textures/lawn.png
-          test -f assets/audio/pea_shot.wav
-          grep -q 'textures/vram_compression/import_etc2_astc=true' project.godot
 
-      - name: Save upgraded game only after successful test
+      - name: Save game after successful test
         shell: bash
         run: |
-          set -e
+          set -euo pipefail
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add scripts/garden.gd scripts/main.gd scripts/pea_anim.gd scripts/deluxe_garden.gd project.godot assets/textures assets/audio
-          if git diff --cached --quiet; then
-            echo "Already upgraded"
-          else
-            git commit -m "Garden Warfare v0.5 detailed garden and animated Peashooter"
+
+          git add scripts/pea_anim.gd scripts/garden.gd scripts/main.gd
+
+          if ! git diff --cached --quiet; then
+            git commit -m "Animate Peashooter in Garden v0.5"
             git push
           fi
