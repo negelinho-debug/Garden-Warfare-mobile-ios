@@ -100,7 +100,7 @@ func _build_main_menu() -> void:
 	content.add_theme_constant_override("separation",15)
 	panel.add_child(content)
 	content.add_child(_label("🌻  GARDEN MOBILE",35,Color("dbf8a1")))
-	content.add_child(_label("3D GARDEN PROTOTYPE  •  VERSION 0.5",16,Color("b9d4ab")))
+	content.add_child(_label("ANIMATED PEASHOOTER  •  VERSION 0.5.1",16,Color("b9d4ab")))
 	content.add_child(_label("Первый сад · спокойная тренировка",19))
 	var play := _btn("▶  ИГРАТЬ")
 	play.pressed.connect(_start_game)

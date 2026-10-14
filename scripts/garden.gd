@@ -2,10 +2,12 @@ extends Node3D
 
 # Garden Warfare Mobile v0.5 - visual pass (original assets)
 const MODEL_LOADER = preload("res://scripts/model_loader.gd")
+const PEA_ANIM = preload("res://scripts/pea_anim.gd")
 
 var player: CharacterBody3D
 var plant: Node3D
 var camera: Camera3D
+var pea_anim
 var active := false
 var joy := Vector2.ZERO
 var yaw := 0.0
@@ -394,6 +396,9 @@ func _make_player() -> void:
 	var imported: Node3D = MODEL_LOADER.instance_model("peashooter")
 	if imported != null:
 		plant.add_child(imported)
+		pea_anim = PEA_ANIM.new()
+		player.add_child(pea_anim)
+		pea_anim.configure(imported, player)
 	else:
 		_cylinder(plant,Vector3(0,0.7,0),0.18,1.1,Color("478640"))
 		_sphere(plant,Vector3(0,1.55,0),Vector3(1.4,1.37,1.25),Color("78b557"))
@@ -451,6 +456,8 @@ func shoot() -> void:
 	if not active or shot_cooldown > 0.0:
 		return
 	shot_cooldown = 0.25
+	if pea_anim != null:
+		pea_anim.recoil()
 	var aim_end: Vector3 = camera.global_position - camera.global_transform.basis.z * 75.0
 	var aim_ray := PhysicsRayQueryParameters3D.create(camera.global_position,aim_end,5)
 	var aimed_hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(aim_ray)
