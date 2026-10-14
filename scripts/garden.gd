@@ -36,17 +36,17 @@ func _build_environment() -> void:
 	var world := WorldEnvironment.new()
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color("93d1e4")
+	env.background_color = Color("7dbbd9")
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color("d3e8d6")
-	env.ambient_light_energy = 0.75
+	env.ambient_light_energy = 0.43
 	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
 	world.environment = env
 	add_child(world)
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-55,-30,-18)
 	sun.light_color = Color("fff1c3")
-	sun.light_energy = 1.0
+	sun.light_energy = 0.78
 	sun.shadow_enabled = true
 	add_child(sun)
 
@@ -101,11 +101,11 @@ func _solid_box(pos: Vector3, size: Vector3, color: Color) -> StaticBody3D:
 	return body
 
 func _build_garden() -> void:
-	_solid_box(Vector3(0,-0.32,0),Vector3(50,0.6,50),Color("80be61"))
+	_solid_box(Vector3(0,-0.32,0),Vector3(50,0.6,50),Color("4c9a5b"))
 	# A curving stepping-stone trail, little hedges, flower beds and wooden fencing.
 	for i in range(13):
 		var t := float(i)
-		_decor_box(self,Vector3(sin(t * 0.52)*1.2,0.01,11.0-t*2.0),Vector3(1.65,0.06,1.4),Color("dbcba6"))
+		_decor_box(self,Vector3(sin(t * 0.52)*1.2,0.01,11.0-t*2.0),Vector3(1.65,0.06,1.4),Color("c3b59a"))
 	for x in range(-22,23,3):
 		for z in [-23,23]:
 			_cylinder(self,Vector3(x,0.9,z),0.13,1.8,Color("a77448"))
@@ -115,7 +115,7 @@ func _build_garden() -> void:
 			_cylinder(self,Vector3(x,0.9,z),0.13,1.8,Color("a77448"))
 			_decor_box(self,Vector3(x,0.86,z),Vector3(0.14,0.17,3.0),Color("d4a66f"))
 	# Small decorated house: boxes are architectural surfaces, not character placeholders.
-	_solid_box(Vector3(-13,2.2,-14),Vector3(8,4.4,7),Color("f3d8a1"))
+	_solid_box(Vector3(-13,2.2,-14),Vector3(8,4.4,7),Color("dec49e"))
 	_decor_box(self,Vector3(-13,4.62,-14),Vector3(9.2,0.45,8.0),Color("bb624b"))
 	_decor_box(self,Vector3(-13,2.15,-10.44),Vector3(1.75,3.25,0.12),Color("8b5d44"))
 	_decor_box(self,Vector3(-15.5,2.95,-10.40),Vector3(1.4,1.55,0.13),Color("89cddd"))
@@ -137,6 +137,13 @@ func _build_garden() -> void:
 		_sphere(self,Vector3(hx,0.45,-18.0),Vector3(1.1,0.8,0.9),Color("488e42"))
 	for i in range(3):
 		_target(Vector3(4.0+float(i)*4.4,1.2,-8.0-float(i%2)*3.5))
+	# Small flowerbeds and bushes to give the prototype more depth.
+	for i in range(36):
+		var side: float = -1.0 if i % 2 == 0 else 1.0
+		var bx: float = side * rng.randf_range(13.0,22.0)
+		var bz: float = rng.randf_range(-19.0,19.0)
+		var tone: Color = Color("3b8549") if i % 3 == 0 else Color("5f9e49")
+		_sphere(self,Vector3(bx,0.40,bz),Vector3(1.1,0.65,0.95),tone)
 	# Decorative starting stones.
 	for i in range(4):
 		_sphere(self,Vector3(-5+float(i)*2,0.12,6.0),Vector3(1.2,0.17,0.9),Color("c7c4af"))
@@ -265,13 +272,19 @@ func shoot() -> void:
 	if not active or shot_cooldown > 0.0:
 		return
 	shot_cooldown = 0.25
-	var position_start := player.global_position + Vector3(0,1.08,0) + Basis(Vector3.UP,yaw) * Vector3(0,0,-0.95)
-	var target_position := camera.global_position - camera.global_transform.basis.z * 30.0
-	var direction := (target_position-position_start).normalized()
+	# Raycast through the crosshair, then launch the pea towards that point.
+	# This reduces missing close targets due to third-person camera parallax.
+	var aim_end: Vector3 = camera.global_position - camera.global_transform.basis.z * 75.0
+	var aim_ray := PhysicsRayQueryParameters3D.create(camera.global_position, aim_end, 5)
+	var aimed_hit: Dictionary = get_world_3d().direct_space_state.intersect_ray(aim_ray)
+	if not aimed_hit.is_empty():
+		aim_end = aimed_hit["position"]
+	var start: Vector3 = player.global_position + Vector3(0,1.08,0) + Basis(Vector3.UP,yaw) * Vector3(0,0,-0.95)
+	var direction: Vector3 = (aim_end - start).normalized()
 	var pea := Node3D.new()
-	pea.position = position_start
+	pea.position = start
 	add_child(pea)
-	_sphere(pea,Vector3.ZERO,Vector3(0.28,0.28,0.28),Color("b9e846"))
+	_sphere(pea,Vector3.ZERO,Vector3(0.30,0.30,0.30),Color("83d438"))
 	shots.append({"node":pea,"dir":direction,"ttl":2.1})
 
 func _update_shots(delta: float) -> void:
@@ -286,6 +299,7 @@ func _update_shots(delta: float) -> void:
 			if collider.has_meta("target"):
 				hits += 1
 				if hit_callback.is_valid(): hit_callback.call(hits)
+				_hit_flash(result["position"])
 			node.queue_free()
 			shots.remove_at(i)
 			continue
@@ -310,3 +324,12 @@ func _update_camera(delta: float) -> void:
 		look_target = Vector3(0,1,0)
 	camera.global_position = camera.global_position.lerp(destination,minf(delta*8.0,1.0))
 	camera.look_at(look_target,Vector3.UP)
+
+func _hit_flash(world_position: Vector3) -> void:
+	var puff := Node3D.new()
+	puff.position = world_position
+	add_child(puff)
+	_sphere(puff, Vector3.ZERO, Vector3(0.42,0.42,0.42), Color("e5f889"))
+	var tween := create_tween()
+	tween.tween_property(puff, "scale", Vector3.ZERO, 0.22)
+	tween.tween_callback(puff.queue_free)

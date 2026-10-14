@@ -13,6 +13,14 @@ var hud: Control
 var score_label: Label
 var sensitivity := 0.38
 
+# Touches belong to the GAME, not to oversized overlapping GUI buttons.
+var joy_finger := -1
+var look_finger := -1
+var fire_fingers: Dictionary = {}
+var joystick_visual: Control
+var fire_visual: Button
+var jump_visual: Button
+
 func _ready() -> void:
 	garden = GARDEN.new()
 	add_child(garden)
@@ -92,7 +100,7 @@ func _build_main_menu() -> void:
 	content.add_theme_constant_override("separation",15)
 	panel.add_child(content)
 	content.add_child(_label("🌻  GARDEN PROJECT",35,Color("dbf8a1")))
-	content.add_child(_label("3D GARDEN PROTOTYPE  •  VERSION 0.3",16,Color("b9d4ab")))
+	content.add_child(_label("3D GARDEN PROTOTYPE  •  VERSION 0.4",16,Color("b9d4ab")))
 	content.add_child(_label("Первый сад · спокойная тренировка",19))
 	var play := _btn("▶  ИГРАТЬ")
 	play.pressed.connect(_start_game)
@@ -145,82 +153,142 @@ func _build_settings() -> void:
 
 func _build_hud() -> void:
 	hud = _screen()
-	var top := HBoxContainer.new()
-	top.anchor_right = 1.0
-	top.offset_left = 28
-	top.offset_top = 18
-	top.offset_right = -24
-	top.offset_bottom = 79
-	top.add_theme_constant_override("separation",16)
-	hud.add_child(top)
-	score_label = _label("🎯  ПОПАДАНИЯ: 0",23,Color("f8f1cc"))
-	top.add_child(score_label)
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	top.add_child(spacer)
+	hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	# Fixed-width score panel: no more vertical letters on wide iPhones.
+	var scoreboard := PanelContainer.new()
+	scoreboard.anchor_left = 0.0
+	scoreboard.anchor_top = 0.0
+	scoreboard.offset_left = 18
+	scoreboard.offset_top = 18
+	scoreboard.offset_right = 275
+	scoreboard.offset_bottom = 72
+	scoreboard.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var scoreboard_style := StyleBoxFlat.new()
+	scoreboard_style.bg_color = Color(0.06, 0.18, 0.10, 0.80)
+	scoreboard_style.set_corner_radius_all(14)
+	scoreboard_style.set_content_margin_all(12)
+	scoreboard.add_theme_stylebox_override("panel", scoreboard_style)
+	hud.add_child(scoreboard)
+	score_label = _label("ПОПАДАНИЯ: 0", 20, Color("f8f1cc"))
+	score_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	score_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	scoreboard.add_child(score_label)
+
 	var pause := _btn("Ⅱ  МЕНЮ")
-	pause.custom_minimum_size = Vector2(150,54)
+	pause.add_theme_font_size_override("font_size", 20)
+	pause.custom_minimum_size = Vector2(0, 0)
+	pause.anchor_left = 1.0
+	pause.anchor_right = 1.0
+	pause.offset_left = -171
+	pause.offset_top = 18
+	pause.offset_right = -18
+	pause.offset_bottom = 73
 	pause.pressed.connect(_return_to_menu)
-	top.add_child(pause)
+	hud.add_child(pause)
 
-	var look := Control.new()
-	look.set_script(LOOK)
-	look.anchor_left = 0.40
-	look.anchor_right = 1.0
-	look.anchor_top = 0.12
-	look.anchor_bottom = 0.96
-	hud.add_child(look)
-	look.connect("look_dragged",func(delta: Vector2): garden.change_look(delta))
+	joystick_visual = Control.new()
+	joystick_visual.set_script(STICK)
+	joystick_visual.anchor_left = 0.0
+	joystick_visual.anchor_right = 0.0
+	joystick_visual.anchor_top = 1.0
+	joystick_visual.anchor_bottom = 1.0
+	joystick_visual.offset_left = 20
+	joystick_visual.offset_right = 210
+	joystick_visual.offset_top = -210
+	joystick_visual.offset_bottom = -20
+	joystick_visual.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hud.add_child(joystick_visual)
 
-	var joy_control := Control.new()
-	joy_control.set_script(STICK)
-	joy_control.anchor_left = 0.0
-	joy_control.anchor_right = 0.0
-	joy_control.anchor_top = 1.0
-	joy_control.anchor_bottom = 1.0
-	joy_control.offset_left = 34
-	joy_control.offset_top = -235
-	joy_control.offset_right = 244
-	joy_control.offset_bottom = -25
-	hud.add_child(joy_control)
-	joy_control.connect("direction_changed",func(v: Vector2): garden.joy = v)
+	jump_visual = _hud_action("↑  ПРЫЖОК", -178, -152, -42, -89)
+	fire_visual = _hud_action("●  ОГОНЬ", -186, -250, -24, -170)
 
-	var fire := _btn("●  ОГОНЬ")
-	fire.anchor_left = 1.0
-	fire.anchor_right = 1.0
-	fire.anchor_top = 1.0
-	fire.anchor_bottom = 1.0
-	fire.offset_left = -230
-	fire.offset_top = -162
-	fire.offset_right = -26
-	fire.offset_bottom = -50
-	fire.button_down.connect(_on_fire_down)
-	fire.button_up.connect(_on_fire_up)
-	hud.add_child(fire)
-
-	var jump := _btn("↑  ПРЫЖОК")
-	jump.anchor_left = 1.0
-	jump.anchor_right = 1.0
-	jump.anchor_top = 1.0
-	jump.anchor_bottom = 1.0
-	jump.offset_left = -240
-	jump.offset_top = -252
-	jump.offset_right = -48
-	jump.offset_bottom = -183
-	jump.pressed.connect(func(): garden.request_jump())
-	hud.add_child(jump)
-
-	var crosshair := _label("+",35,Color("fff8dc"))
+	var crosshair := _label("+", 29, Color("fff8dc"))
 	crosshair.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	crosshair.anchor_left = 0.5
 	crosshair.anchor_right = 0.5
 	crosshair.anchor_top = 0.5
 	crosshair.anchor_bottom = 0.5
-	crosshair.offset_left = -20
-	crosshair.offset_top = -24
-	crosshair.offset_right = 20
-	crosshair.offset_bottom = 24
+	crosshair.offset_left = -16
+	crosshair.offset_top = -20
+	crosshair.offset_right = 16
+	crosshair.offset_bottom = 20
 	hud.add_child(crosshair)
+
+func _hud_action(title: String, left: float, top: float, right: float, bottom: float) -> Button:
+	var button := _btn(title)
+	button.custom_minimum_size = Vector2.ZERO
+	button.add_theme_font_size_override("font_size", 21)
+	button.focus_mode = Control.FOCUS_NONE
+	# Visual only; independent multitouch handled by _input below.
+	button.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	button.anchor_left = 1.0
+	button.anchor_right = 1.0
+	button.anchor_top = 1.0
+	button.anchor_bottom = 1.0
+	button.offset_left = left
+	button.offset_right = right
+	button.offset_top = top
+	button.offset_bottom = bottom
+	hud.add_child(button)
+	return button
+
+func _input(event: InputEvent) -> void:
+	if hud == null or not hud.visible:
+		return
+	if event is InputEventScreenTouch:
+		_handle_touch(event.index, event.position, event.pressed)
+	elif event is InputEventScreenDrag:
+		if event.index == joy_finger:
+			_move_joystick(event.position)
+		elif event.index == look_finger:
+			# Keep the original camera behavior and sensitivity.
+			garden.change_look(event.relative)
+
+func _handle_touch(finger: int, position: Vector2, pressed: bool) -> void:
+	if pressed:
+		# The pause button keeps its normal Godot GUI interaction.
+		if position.y < 95.0:
+			return
+		if fire_visual.get_global_rect().has_point(position):
+			fire_fingers[finger] = true
+			garden.firing = true
+			garden.shoot()
+			fire_visual.modulate = Color("c8ffa4")
+			return
+		if jump_visual.get_global_rect().has_point(position):
+			garden.request_jump()
+			jump_visual.modulate = Color("c8ffa4")
+			return
+		if joy_finger == -1 and joystick_visual.get_global_rect().grow(36).has_point(position):
+			joy_finger = finger
+			_move_joystick(position)
+			return
+		if look_finger == -1 and position.x > get_viewport().get_visible_rect().size.x * 0.30:
+			look_finger = finger
+	else:
+		if fire_fingers.has(finger):
+			fire_fingers.erase(finger)
+			garden.firing = not fire_fingers.is_empty()
+			fire_visual.modulate = Color.WHITE
+		if finger == joy_finger:
+			joy_finger = -1
+			garden.joy = Vector2.ZERO
+			joystick_visual.call("set_direction", Vector2.ZERO)
+		if finger == look_finger:
+			look_finger = -1
+		jump_visual.modulate = Color.WHITE
+
+func _move_joystick(position: Vector2) -> void:
+	var rect: Rect2 = joystick_visual.get_global_rect()
+	var center: Vector2 = rect.get_center()
+	var radius: float = minf(rect.size.x, rect.size.y) * 0.34
+	var d: Vector2 = (position - center) / radius
+	if d.length() < 0.12:
+		d = Vector2.ZERO
+	d = d.limit_length(1.0)
+	garden.joy = d
+	joystick_visual.call("set_direction", d)
 
 func _change_screen(which: String) -> void:
 	main_menu.visible = which == "menu"
@@ -229,13 +297,15 @@ func _change_screen(which: String) -> void:
 	hud.visible = which == "game"
 
 func _start_game() -> void:
+	_clear_touches()
 	garden.set_playing(true)
 	_change_screen("game")
 
 func _on_hit(total: int) -> void:
-	score_label.text = "🎯  ПОПАДАНИЯ: %d" % total
+	score_label.text = "ПОПАДАНИЯ: %d" % total
 
 func _return_to_menu() -> void:
+	_clear_touches()
 	garden.set_playing(false)
 	_change_screen("menu")
 
@@ -249,3 +319,17 @@ func _on_fire_up() -> void:
 func _on_sensitivity_changed(value: float) -> void:
 	sensitivity = value
 	garden.sensitivity = value / 100.0
+
+func _clear_touches() -> void:
+	joy_finger = -1
+	look_finger = -1
+	fire_fingers.clear()
+	if garden != null:
+		garden.joy = Vector2.ZERO
+		garden.firing = false
+	if joystick_visual != null:
+		joystick_visual.call("set_direction", Vector2.ZERO)
+	if fire_visual != null:
+		fire_visual.modulate = Color.WHITE
+	if jump_visual != null:
+		jump_visual.modulate = Color.WHITE

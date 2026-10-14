@@ -1,65 +1,21 @@
 extends Control
-signal direction_changed(direction: Vector2)
-
-var touch_id := -1
+# Visual joystick. The main game owns each finger to support true multitouch.
 var direction := Vector2.ZERO
-var pointer := Vector2.ZERO
-const DEAD_ZONE := 10.0
 
 func _ready() -> void:
-	mouse_filter = Control.MOUSE_FILTER_STOP
-	pointer = size / 2.0
-	resized.connect(_on_resized)
-
-func _gui_input(event: InputEvent) -> void:
-	if event is InputEventScreenTouch:
-		if event.pressed and touch_id == -1:
-			touch_id = event.index
-			_set_pointer(event.position)
-			accept_event()
-		elif not event.pressed and event.index == touch_id:
-			_reset()
-			accept_event()
-	elif event is InputEventScreenDrag and event.index == touch_id:
-		_set_pointer(event.position)
-		accept_event()
-	elif event is InputEventMouseButton:
-		if event.button_index == MOUSE_BUTTON_LEFT:
-			if event.pressed:
-				touch_id = -2
-				_set_pointer(event.position)
-			else:
-				_reset()
-			accept_event()
-	elif event is InputEventMouseMotion and touch_id == -2:
-		_set_pointer(event.position)
-		accept_event()
-
-func _set_pointer(pos: Vector2) -> void:
-	var center := size / 2.0
-	var radius: float = minf(size.x, size.y) * 0.32
-	var raw := pos - center
-	pointer = center + raw.limit_length(radius)
-	direction = raw / radius if raw.length() > DEAD_ZONE else Vector2.ZERO
-	direction = direction.limit_length(1.0)
-	direction_changed.emit(direction)
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	resized.connect(queue_redraw)
 	queue_redraw()
 
-func _reset() -> void:
-	touch_id = -1
-	direction = Vector2.ZERO
-	pointer = size / 2.0
-	direction_changed.emit(direction)
+func set_direction(value: Vector2) -> void:
+	direction = value.limit_length(1.0)
 	queue_redraw()
 
 func _draw() -> void:
 	var center := size / 2.0
-	var radius: float = minf(size.x, size.y) * 0.32
-	draw_circle(center, radius + 6.0, Color(0.05,0.14,0.06,0.42))
-	draw_arc(center, radius, 0.0, TAU, 64, Color(0.76,0.99,0.57,0.70), 5.0, true)
-	draw_circle(pointer, radius * 0.43, Color(0.65,0.93,0.32,0.78))
-	draw_circle(pointer, radius * 0.30, Color(0.23,0.53,0.13,0.85))
-
-func _on_resized() -> void:
-	pointer = size / 2.0
-	queue_redraw()
+	var radius: float = minf(size.x, size.y) * 0.34
+	var knob := center + direction * radius
+	draw_circle(center, radius + 8.0, Color(0.06, 0.16, 0.08, 0.45))
+	draw_arc(center, radius, 0.0, TAU, 64, Color(0.82, 1.0, 0.70, 0.8), 4.0, true)
+	draw_circle(knob, radius * 0.42, Color(0.59, 0.86, 0.28, 0.92))
+	draw_circle(knob, radius * 0.26, Color(0.22, 0.50, 0.15, 0.94))
