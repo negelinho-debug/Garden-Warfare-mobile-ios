@@ -1,5 +1,5 @@
 
-name: Import Garden Game
+name: Update Garden Game v0.4
 
 on:
   workflow_dispatch:
@@ -8,32 +8,44 @@ permissions:
   contents: write
 
 jobs:
-  game:
+  update:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Unpack game
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install v0.4 project
         run: |
-          unzip -oq Garden_Project_v0.3_NoCubes.zip -d . -x '.github/*'
+          set -e
+          test -f Garden_Project_v0.4.zip
+          unzip -tq Garden_Project_v0.4.zip
+          unzip -oq Garden_Project_v0.4.zip -d . -x '.github/*'
           test -f project.godot
           test -f assets/models/peashooter.glb
-          rm Garden_Project_v0.3_NoCubes.zip
+          grep -q 'func _handle_touch' scripts/main.gd
+          grep -q 'func _hit_flash' scripts/garden.gd
+          rm Garden_Project_v0.4.zip
 
-      - name: Save game files
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "Import Garden Game v0.3"
-          git push
-
-      - uses: chickensoft-games/setup-godot@v2
+      - name: Install Godot
+        uses: chickensoft-games/setup-godot@v2
         with:
           version: 4.4.1
           use-dotnet: false
 
-      - name: Check Godot game
+      - name: Validate before saving
         run: |
           godot --headless --path . --editor --import --quit
           godot --headless --path . --quit-after 5
+
+      - name: Save updated game
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A -- scripts scenes assets project.godot README.md README_RU.md Garden_Project_v0.4.zip
+          if git diff --cached --quiet; then
+            echo "Project already updated"
+          else
+            git commit -m "Update Garden Warfare to v0.4"
+            git push
+          fi
